@@ -1,0 +1,8 @@
+{
+  "host": "0.0.0.0",
+  "port": 8080,
+  "resend_batch_size": 100,
+  "resend_batch_workers": 2,
+  "resend_rank_workers": 4,
+  "resend_http_timeout_sec": 10
+}

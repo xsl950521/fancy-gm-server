@@ -1,0 +1,44 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+
+# Project specific
+*.xlsx
+*.csv
+storage/uploads/*
+storage/results/*
+storage/temp/*
+storage/history/*
+!storage/uploads/.gitkeep
+!storage/results/.gitkeep
+!storage/temp/.gitkeep
+!storage/history/.gitkeep
+config.json
+config.web.json
+config/lua/*.lua
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 操作系统
+.DS_Store
+Thumbs.db
