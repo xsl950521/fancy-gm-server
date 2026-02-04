@@ -1,0 +1,905 @@
+openapi: 3.0.3
+info:
+  title: GM Server API
+  description: 游戏管理工具后端服务API文档
+  version: 1.0.0
+  contact:
+    name: API Support
+
+servers:
+  - url: http://localhost:8080/api
+    description: 本地开发服务器
+  - url: https://api.example.com/api
+    description: 生产服务器
+
+tags:
+  - name: 文件上传与处理
+    description: 文件上传、任务处理相关接口
+  - name: 数据查询
+    description: 数据查询和下载接口
+  - name: 历史记录
+    description: 历史记录管理接口
+  - name: 数据分析
+    description: 数据分析接口
+  - name: 漏发名单
+    description: 漏发名单管理接口
+
+paths:
+  /upload:
+    post:
+      tags:
+        - 文件上传与处理
+      summary: 上传文件
+      description: 上传文件并创建处理任务
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - files
+              properties:
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                  description: 要上传的文件列表（.txt格式）
+                mode:
+                  type: string
+                  enum: [all, daily, total, reward, mail, month, clubpid]
+                  default: all
+                  description: 处理模式
+                archive:
+                  type: boolean
+                  default: false
+                  description: 是否归档文件
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+  /process/{jobId}:
+    post:
+      tags:
+        - 文件上传与处理
+      summary: 处理任务
+      description: 启动任务处理（异步）
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 任务ID
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProcessResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /status/{jobId}:
+    get:
+      tags:
+        - 文件上传与处理
+      summary: 查询任务状态
+      description: 查询任务处理状态
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 任务ID
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JobStatusResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /data:
+    get:
+      tags:
+        - 数据查询
+      summary: 查询数据
+      description: 查询处理完成的任务数据（分页）
+      parameters:
+        - name: jobId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: 任务ID
+        - name: sheet
+          in: query
+          schema:
+            type: string
+          description: 工作表名称
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+          description: 页码
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 100
+            maximum: 1000
+          description: 每页数量
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /download/{jobId}:
+    get:
+      tags:
+        - 数据查询
+      summary: 下载文件
+      description: 下载处理结果文件
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 任务ID
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [excel, csv]
+            default: excel
+          description: 下载格式
+        - name: sheet
+          in: query
+          schema:
+            type: string
+          description: 工作表名称（仅CSV格式需要）
+      responses:
+        '200':
+          description: 文件流
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
+            text/csv:
+              schema:
+                type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /history:
+    get:
+      tags:
+        - 历史记录
+      summary: 获取历史记录列表（分页）
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+          description: 页码
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            default: 100
+            minimum: 1
+            maximum: 1000
+          description: 每页数量
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PageResponse'
+
+  /history/{id}:
+    get:
+      tags:
+        - 历史记录
+      summary: 获取历史记录详情
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 历史记录ID
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HistoryResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+    delete:
+      tags:
+        - 历史记录
+      summary: 删除历史记录
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+          description: 历史记录ID
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  /analytics/statistics:
+    get:
+      tags:
+        - 数据分析
+      summary: 获取统计数据
+      parameters:
+        - name: jobId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: 任务ID
+        - name: sheet
+          in: query
+          schema:
+            type: string
+          description: 工作表名称
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StatisticsResponse'
+
+  /analytics/sheets:
+    get:
+      tags:
+        - 数据分析
+      summary: 获取工作表列表
+      parameters:
+        - name: jobId
+          in: query
+          required: true
+          schema:
+            type: string
+          description: 任务ID
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SheetsResponse'
+
+  /missinglist/fetch:
+    post:
+      tags:
+        - 漏发名单
+      summary: 拉取漏发名单
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FetchRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FetchResponse'
+
+  /missinglist/filter:
+    post:
+      tags:
+        - 漏发名单
+      summary: 筛选漏发名单
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FilterRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FilterResponse'
+
+  /missinglist/group:
+    post:
+      tags:
+        - 漏发名单
+      summary: 分组漏发名单
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - items
+              properties:
+                items:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/MissingListItem'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GroupResponse'
+
+  /missinglist/parse-excel:
+    post:
+      tags:
+        - 漏发名单
+      summary: 解析Excel文件
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - file_data
+              properties:
+                file_data:
+                  type: string
+                  description: Base64编码的Excel文件
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParseExcelResponse'
+
+  /missinglist/resend:
+    post:
+      tags:
+        - 漏发名单
+      summary: 补发邮件
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ResendRequest'
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResendResponse'
+
+  /missinglist/parse-lua:
+    post:
+      tags:
+        - 漏发名单
+      summary: 解析Lua配置
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - content
+                - game_type
+              properties:
+                content:
+                  type: string
+                  description: Lua文件内容
+                game_type:
+                  type: string
+                  enum: [bydr, dsc, cqsj, yxds]
+                  description: 游戏类型
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ParseLuaResponse'
+
+  /missinglist/load-default-config:
+    post:
+      tags:
+        - 漏发名单
+      summary: 加载默认配置
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - iid
+              properties:
+                iid:
+                  type: string
+                  description: 游戏ID
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoadConfigResponse'
+
+  /missinglist/item-map:
+    get:
+      tags:
+        - 漏发名单
+      summary: 获取道具映射
+      responses:
+        '200':
+          description: 成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ItemMapResponse'
+
+components:
+  schemas:
+    Response:
+      type: object
+      properties:
+        code:
+          type: integer
+          description: 错误码，0表示成功
+        message:
+          type: string
+          description: 消息
+        data:
+          type: object
+          description: 数据
+        error:
+          type: string
+          description: 错误信息
+
+    FileInfo:
+      type: object
+      properties:
+        filename:
+          type: string
+        size:
+          type: integer
+        type:
+          type: string
+        path:
+          type: string
+
+    UploadResponse:
+      allOf:
+        - $ref: '#/components/schemas/Response'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                jobId:
+                  type: string
+                status:
+                  type: string
+                files:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/FileInfo'
+
+    ProcessResponse:
+      allOf:
+        - $ref: '#/components/schemas/Response'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                jobId:
+                  type: string
+                status:
+                  type: string
+
+    JobStatusResponse:
+      allOf:
+        - $ref: '#/components/schemas/Response'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                id:
+                  type: string
+                status:
+                  type: string
+                  enum: [pending, processing, completed, failed]
+                mode:
+                  type: string
+                progress:
+                  type: integer
+                totalFiles:
+                  type: integer
+                processedFiles:
+                  type: integer
+                errorFiles:
+                  type: integer
+                results:
+                  type: array
+                  items:
+                    type: object
+                createdAt:
+                  type: string
+                  format: date-time
+                completedAt:
+                  type: string
+                  format: date-time
+
+    PageResponse:
+      allOf:
+        - $ref: '#/components/schemas/Response'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                total:
+                  type: integer
+                  format: int64
+                page:
+                  type: integer
+                page_size:
+                  type: integer
+                total_pages:
+                  type: integer
+
+    DataResponse:
+      allOf:
+        - $ref: '#/components/schemas/Response'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                items:
+                  type: array
+                  items:
+                    type: object
+                columns:
+                  type: array
+                  items:
+                    type: string
+                total:
+                  type: integer
+                  format: int64
+                page:
+                  type: integer
+                page_size:
+                  type: integer
+                total_pages:
+                  type: integer
+
+    HistoryResponse:
+      allOf:
+        - $ref: '#/components/schemas/Response'
+        - type: object
+
+    SuccessResponse:
+      allOf:
+        - $ref: '#/components/schemas/Response'
+        - type: object
+          properties:
+            message:
+              type: string
+
+    StatisticsResponse:
+      allOf:
+        - $ref: '#/components/schemas/Response'
+        - type: object
+
+    SheetsResponse:
+      allOf:
+        - $ref: '#/components/schemas/Response'
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                sheets:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      sheetName:
+                        type: string
+                      rowCount:
+                        type: integer
+
+    MissingListItem:
+      type: object
+      properties:
+        day:
+          type: integer
+        psid:
+          type: integer
+          format: int64
+        score:
+          type: integer
+          format: int64
+        server_id:
+          type: string
+        type:
+          type: string
+        rank:
+          type: integer
+        on:
+          type: integer
+          format: int64
+        hid:
+          type: integer
+        iid:
+          type: string
+        datetime:
+          type: string
+        is_club_rank:
+          type: boolean
+
+    FetchRequest:
+      type: object
+      required:
+        - base_url
+        - timestamp
+        - sign
+        - iid
+      properties:
+        base_url:
+          type: string
+        timestamp:
+          type: string
+        sign:
+          type: string
+        iid:
+          type: string
+
+    FetchResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MissingListItem'
+        count:
+          type: integer
+
+    FilterRequest:
+      type: object
+      required:
+        - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/MissingListItem'
+        hid:
+          type: integer
+        iid:
+          type: string
+        on:
+          type: integer
+          format: int64
+        is_club_rank:
+          type: boolean
+        rank_type:
+          type: string
+          enum: [daily, total]
+
+    FilterResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/MissingListItem'
+        count:
+          type: integer
+
+    GroupResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              $ref: '#/components/schemas/MissingListItem'
+        count:
+          type: integer
+
+    ParseExcelResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        data:
+          type: array
+          items:
+            type: object
+            properties:
+              roleid:
+                type: integer
+                format: int64
+              rank:
+                type: integer
+        count:
+          type: integer
+
+    ResendRequest:
+      type: object
+      required:
+        - url
+        - rank_type
+        - title
+        - content
+        - reward_config
+        - players
+      properties:
+        url:
+          type: string
+        rank_type:
+          type: string
+          enum: [daily_person, total_person, daily_club, total_club]
+        group:
+          type: string
+        timestamp:
+          type: string
+        sign:
+          type: string
+        title:
+          type: string
+        content:
+          type: string
+        reward_config:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties:
+              type: integer
+        players:
+          type: array
+          items:
+            type: object
+            properties:
+              roleid:
+                type: integer
+                format: int64
+              rank:
+                type: integer
+        use_batch:
+          type: boolean
+          default: false
+
+    ResendResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        results:
+          type: array
+          items:
+            type: object
+        total:
+          type: integer
+
+    ParseLuaResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        config:
+          type: object
+
+    LoadConfigResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        config:
+          type: object
+        content:
+          type: string
+
+    ItemMapResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        item_map:
+          type: object
+          additionalProperties:
+            type: string
+
+  responses:
+    BadRequest:
+      description: 请求参数错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Response'
+          example:
+            code: 1001
+            message: 参数错误
+            error: "[1001] 参数错误: 详细错误信息"
+
+    NotFound:
+      description: 资源不存在
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Response'
+          example:
+            code: 1002
+            message: 资源不存在
+            error: "[1002] 资源不存在"
+
+    InternalError:
+      description: 内部服务器错误
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Response'
+          example:
+            code: 1003
+            message: 内部服务器错误
+            error: "[1003] 内部服务器错误: 详细错误信息"

@@ -1,7 +1,8 @@
 package handlers
 
 import (
-	"fmt"
+	"redis_data/api/validators"
+	"redis_data/pkg/response"
 	"redis_data/service/history"
 
 	"github.com/gin-gonic/gin"
@@ -19,55 +20,52 @@ func NewHistoryHandler(hm *history.HistoryManager) *HistoryHandler {
 	}
 }
 
-// GetHistories 获取历史记录列表
+// GetHistories 获取历史记录列表（分页）
 func (h *HistoryHandler) GetHistories(c *gin.Context) {
-	limit := 100 // 默认返回100条
-	if limitStr := c.Query("limit"); limitStr != "" {
-		if parsedLimit, err := parseInt(limitStr); err == nil && parsedLimit > 0 {
-			limit = parsedLimit
-		}
-	}
-
-	histories, err := h.HistoryManager.GetHistories(limit)
-	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to load histories: " + err.Error()})
+	var req validators.GetHistoryRequest
+	// 设置默认值
+	req.Page = 1
+	req.PageSize = 100
+	if !validators.ValidateQuery(c, &req) {
 		return
 	}
 
-	c.JSON(200, gin.H{
-		"histories": histories,
-		"total":     len(histories),
-	})
+	histories, total, err := h.HistoryManager.GetHistories(req.Page, req.PageSize)
+	if err != nil {
+		response.InternalError(c, err)
+		return
+	}
+
+	response.SuccessPage(c, histories, total, req.Page, req.PageSize)
 }
 
 // GetHistory 获取单个历史记录详情
 func (h *HistoryHandler) GetHistory(c *gin.Context) {
-	id := c.Param("id")
-
-	entry, err := h.HistoryManager.GetHistory(id)
-	if err != nil {
-		c.JSON(404, gin.H{"error": "History not found"})
+	var req validators.GetHistoryDetailRequest
+	if !validators.ValidateURI(c, &req) {
 		return
 	}
 
-	c.JSON(200, entry)
+	entry, err := h.HistoryManager.GetHistory(req.ID)
+	if err != nil {
+		response.NotFound(c, "历史记录不存在")
+		return
+	}
+
+	response.Success(c, entry)
 }
 
 // DeleteHistory 删除历史记录
 func (h *HistoryHandler) DeleteHistory(c *gin.Context) {
-	id := c.Param("id")
-
-	if err := h.HistoryManager.DeleteHistory(id); err != nil {
-		c.JSON(500, gin.H{"error": "Failed to delete history: " + err.Error()})
+	var req validators.DeleteHistoryRequest
+	if !validators.ValidateURI(c, &req) {
 		return
 	}
 
-	c.JSON(200, gin.H{"message": "History deleted successfully"})
-}
+	if err := h.HistoryManager.DeleteHistory(req.ID); err != nil {
+		response.InternalError(c, err)
+		return
+	}
 
-// parseInt 解析整数（辅助函数）
-func parseInt(s string) (int, error) {
-	var result int
-	_, err := fmt.Sscanf(s, "%d", &result)
-	return result, err
+	response.Success(c, "历史记录删除成功")
 }

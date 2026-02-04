@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"redis_data/api/models"
+	"redis_data/pkg/errors"
+	"redis_data/pkg/response"
 	"strings"
 	"time"
 
@@ -34,13 +36,13 @@ func (h *UploadHandler) UploadFiles(c *gin.Context) {
 	// 解析表单
 	form, err := c.MultipartForm()
 	if err != nil {
-		c.JSON(400, gin.H{"error": "Failed to parse multipart form: " + err.Error()})
+		response.Error(c, errors.Wrap(err, errors.ErrCodeInvalidParam, "解析表单失败"))
 		return
 	}
 
 	files := form.File["files"]
 	if len(files) == 0 {
-		c.JSON(400, gin.H{"error": "No files uploaded"})
+		response.BadRequest(c, "未上传文件")
 		return
 	}
 
@@ -73,7 +75,7 @@ func (h *UploadHandler) UploadFiles(c *gin.Context) {
 	}
 
 	if len(fileInfos) == 0 {
-		c.JSON(400, gin.H{"error": "No valid files uploaded"})
+		response.BadRequest(c, "没有有效的文件")
 		return
 	}
 
@@ -86,9 +88,13 @@ func (h *UploadHandler) UploadFiles(c *gin.Context) {
 	archive := c.PostForm("archive") == "true"
 
 	// 创建任务
-	job := h.JobManager.CreateJob(jobID, mode, archive, fileInfos)
+	job, err := h.JobManager.CreateJob(jobID, mode, archive, fileInfos)
+	if err != nil {
+		response.Error(c, err)
+		return
+	}
 
-	c.JSON(200, gin.H{
+	response.Success(c, gin.H{
 		"jobId":  job.ID,
 		"status": job.Status,
 		"files":  fileInfos,

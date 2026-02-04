@@ -1,20 +1,22 @@
 package models
 
 import (
-	"sync"
+	"redis_data/pkg/errors"
+	"redis_data/pkg/logger"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 // JobManager 任务管理器
 type JobManager struct {
-	jobs map[string]*Job
-	mu   sync.RWMutex
+	repo JobRepository
 }
 
 // NewJobManager 创建任务管理器
-func NewJobManager() *JobManager {
+func NewJobManager(repo JobRepository) *JobManager {
 	jm := &JobManager{
-		jobs: make(map[string]*Job),
+		repo: repo,
 	}
 	// 启动清理协程，定期清理过期任务（24小时）
 	go jm.cleanupExpiredJobs()
@@ -22,10 +24,7 @@ func NewJobManager() *JobManager {
 }
 
 // CreateJob 创建新任务
-func (jm *JobManager) CreateJob(id, mode string, archive bool, files []FileInfo) *Job {
-	jm.mu.Lock()
-	defer jm.mu.Unlock()
-
+func (jm *JobManager) CreateJob(id, mode string, archive bool, files []FileInfo) (*Job, error) {
 	job := &Job{
 		ID:            id,
 		Status:        JobStatusPending,
@@ -40,23 +39,55 @@ func (jm *JobManager) CreateJob(id, mode string, archive bool, files []FileInfo)
 		CreatedAt:     time.Now(),
 	}
 
-	jm.jobs[id] = job
-	return job
+	if err := jm.repo.Create(job); err != nil {
+		logger.Logger.Error("Failed to create job",
+			zap.String("job_id", id),
+			zap.Error(err),
+		)
+		return nil, errors.Wrap(err, errors.ErrCodeInternal, "创建任务失败")
+	}
+
+	return job, nil
 }
 
 // GetJob 获取任务
 func (jm *JobManager) GetJob(id string) (*Job, bool) {
-	jm.mu.RLock()
-	defer jm.mu.RUnlock()
-	job, exists := jm.jobs[id]
-	return job, exists
+	job, err := jm.repo.GetByID(id)
+	if err != nil {
+		logger.Logger.Error("Failed to get job",
+			zap.String("job_id", id),
+			zap.Error(err),
+		)
+		return nil, false
+	}
+	if job == nil {
+		return nil, false
+	}
+	return job, true
+}
+
+// UpdateJob 更新任务
+func (jm *JobManager) UpdateJob(job *Job) error {
+	if err := jm.repo.Update(job); err != nil {
+		logger.Logger.Error("Failed to update job",
+			zap.String("job_id", job.ID),
+			zap.Error(err),
+		)
+		return errors.Wrap(err, errors.ErrCodeInternal, "更新任务失败")
+	}
+	return nil
 }
 
 // DeleteJob 删除任务
-func (jm *JobManager) DeleteJob(id string) {
-	jm.mu.Lock()
-	defer jm.mu.Unlock()
-	delete(jm.jobs, id)
+func (jm *JobManager) DeleteJob(id string) error {
+	if err := jm.repo.Delete(id); err != nil {
+		logger.Logger.Error("Failed to delete job",
+			zap.String("job_id", id),
+			zap.Error(err),
+		)
+		return errors.Wrap(err, errors.ErrCodeInternal, "删除任务失败")
+	}
+	return nil
 }
 
 // cleanupExpiredJobs 清理过期任务（24小时）
@@ -65,14 +96,8 @@ func (jm *JobManager) cleanupExpiredJobs() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		jm.mu.Lock()
-		now := time.Now()
-		for id, job := range jm.jobs {
-			// 删除24小时前完成的任务
-			if job.CompletedAt != nil && now.Sub(*job.CompletedAt) > 24*time.Hour {
-				delete(jm.jobs, id)
-			}
+		if err := jm.repo.CleanupExpired(24 * time.Hour); err != nil {
+			logger.Logger.Error("Failed to cleanup expired jobs", zap.Error(err))
 		}
-		jm.mu.Unlock()
 	}
 }

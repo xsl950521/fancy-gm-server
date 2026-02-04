@@ -1,0 +1,154 @@
+# GM Server Makefile for Windows
+# Windows 版本的 Makefile（使用 PowerShell）
+
+# 变量定义
+APP_NAME := gm-server
+VERSION := $(shell git describe --tags --always --dirty 2>nul || echo dev)
+BUILD_TIME := $(shell powershell -Command "Get-Date -Format 'yyyy-MM-dd HH:mm:ss'")
+BUILD_DIR := build
+CMD_DIR := cmd\web
+MAIN_FILE := $(CMD_DIR)\main.go
+
+# Go 编译参数
+LDFLAGS := -X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME) -s -w
+BUILD_FLAGS := -ldflags "$(LDFLAGS)"
+
+# 默认目标
+.DEFAULT_GOAL := help
+
+##@ 帮助信息
+
+.PHONY: help
+help:
+	@echo GM Server Makefile (Windows)
+	@echo.
+	@echo 可用命令:
+	@echo   make build          - 构建当前平台的可执行文件
+	@echo   make build-windows  - 构建 Windows 版本
+	@echo   make build-linux    - 构建 Linux 版本
+	@echo   make build-macos    - 构建 macOS 版本
+	@echo   make build-all      - 构建所有平台版本
+	@echo   make run            - 运行开发服务器
+	@echo   make run-config     - 运行开发服务器（使用YAML配置）
+	@echo   make test           - 运行测试
+	@echo   make clean          - 清理构建文件
+	@echo   make deps           - 下载依赖
+	@echo   make deps-tidy      - 整理依赖
+
+##@ 开发环境
+
+.PHONY: run
+run:
+	@echo 启动开发服务器...
+	@go run $(MAIN_FILE)
+
+.PHONY: run-config
+run-config:
+	@echo 启动开发服务器（使用config.yaml）...
+	@go run $(MAIN_FILE) --config config.yaml
+
+.PHONY: test
+test:
+	@echo 运行测试...
+	@go test -v ./...
+
+##@ 构建
+
+.PHONY: build
+build:
+	@echo 构建 $(APP_NAME)...
+	@if not exist $(BUILD_DIR) mkdir $(BUILD_DIR)
+	@go build $(BUILD_FLAGS) -o $(BUILD_DIR)\$(APP_NAME).exe $(MAIN_FILE)
+	@echo 构建完成: $(BUILD_DIR)\$(APP_NAME).exe
+
+.PHONY: build-windows
+build-windows:
+	@echo 构建 Windows 版本...
+	@if not exist $(BUILD_DIR)\windows mkdir $(BUILD_DIR)\windows
+	@set GOOS=windows && set GOARCH=amd64 && go build $(BUILD_FLAGS) -o $(BUILD_DIR)\windows\$(APP_NAME).exe $(MAIN_FILE)
+	@echo 构建完成: $(BUILD_DIR)\windows\$(APP_NAME).exe
+
+.PHONY: build-linux
+build-linux:
+	@echo 构建 Linux 版本...
+	@if not exist $(BUILD_DIR)\linux mkdir $(BUILD_DIR)\linux
+	@set GOOS=linux && set GOARCH=amd64 && go build $(BUILD_FLAGS) -o $(BUILD_DIR)\linux\$(APP_NAME) $(MAIN_FILE)
+	@echo 构建完成: $(BUILD_DIR)\linux\$(APP_NAME)
+
+.PHONY: build-macos
+build-macos:
+	@echo 构建 macOS 版本...
+	@if not exist $(BUILD_DIR)\macos mkdir $(BUILD_DIR)\macos
+	@set GOOS=darwin && set GOARCH=amd64 && go build $(BUILD_FLAGS) -o $(BUILD_DIR)\macos\$(APP_NAME) $(MAIN_FILE)
+	@echo 构建完成: $(BUILD_DIR)\macos\$(APP_NAME)
+
+.PHONY: build-macos-arm
+build-macos-arm:
+	@echo 构建 macOS ARM64 版本...
+	@if not exist $(BUILD_DIR)\macos-arm mkdir $(BUILD_DIR)\macos-arm
+	@set GOOS=darwin && set GOARCH=arm64 && go build $(BUILD_FLAGS) -o $(BUILD_DIR)\macos-arm\$(APP_NAME) $(MAIN_FILE)
+	@echo 构建完成: $(BUILD_DIR)\macos-arm\$(APP_NAME)
+
+.PHONY: build-all
+build-all:
+	@echo 构建所有平台版本...
+	@$(MAKE) build-windows
+	@$(MAKE) build-linux
+	@$(MAKE) build-macos
+	@$(MAKE) build-macos-arm
+	@echo 所有平台构建完成
+
+##@ 依赖管理
+
+.PHONY: deps
+deps:
+	@echo 下载依赖...
+	@go mod download
+
+.PHONY: deps-tidy
+deps-tidy:
+	@echo 整理依赖...
+	@go mod tidy
+
+.PHONY: deps-update
+deps-update:
+	@echo 更新依赖...
+	@go get -u ./...
+	@go mod tidy
+
+##@ 清理
+
+.PHONY: clean
+clean:
+	@echo 清理构建文件...
+	@if exist $(BUILD_DIR) rmdir /s /q $(BUILD_DIR)
+	@if exist coverage.out del coverage.out
+	@if exist coverage.html del coverage.html
+	@echo 清理完成
+
+.PHONY: clean-all
+clean-all: clean
+	@echo 清理所有生成文件...
+	@if exist vendor rmdir /s /q vendor
+	@go clean -cache
+	@echo 清理完成
+
+##@ 工具
+
+.PHONY: fmt
+fmt:
+	@echo 格式化代码...
+	@go fmt ./...
+
+.PHONY: vet
+vet:
+	@echo 运行 go vet...
+	@go vet ./...
+
+.PHONY: info
+info:
+	@echo === 项目信息 ===
+	@echo 应用名称: $(APP_NAME)
+	@echo 版本: $(VERSION)
+	@echo 构建时间: $(BUILD_TIME)
+	@go version

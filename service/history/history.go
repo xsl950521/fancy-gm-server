@@ -1,72 +1,64 @@
 package history
 
 import (
-	"encoding/json"
-	"fmt"
-	"os"
-	"path/filepath"
 	"redis_data/api/models"
-	"sort"
-	"sync"
-	"time"
+	"redis_data/internal/model"
+	"redis_data/internal/repository"
+	"redis_data/pkg/errors"
+	"redis_data/pkg/logger"
+
+	"go.uber.org/zap"
 )
+
+// HistoryEntry 历史记录条目（保持向后兼容，实际使用model.HistoryEntry）
+type HistoryEntry = model.HistoryEntry
 
 // HistoryManager 历史记录管理器
 type HistoryManager struct {
-	historyFile string
-	mu          sync.RWMutex
-}
-
-// HistoryEntry 历史记录条目
-type HistoryEntry struct {
-	ID            string                 `json:"id"`
-	Mode          string                 `json:"mode"`
-	Archive       bool                   `json:"archive"`
-	Files         []models.FileInfo      `json:"files"`
-	TotalFiles    int                    `json:"totalFiles"`
-	ProcessedFiles int                   `json:"processedFiles"`
-	ErrorFiles    int                    `json:"errorFiles"`
-	Results       []models.SheetResult  `json:"results"`
-	Status        string                 `json:"status"`
-	Error         string                 `json:"error,omitempty"`
-	CreatedAt     time.Time              `json:"createdAt"`
-	CompletedAt   *time.Time             `json:"completedAt,omitempty"`
-	ResultPath    string                 `json:"resultPath"` // Excel文件路径
+	repo repository.HistoryRepository
 }
 
 // NewHistoryManager 创建历史记录管理器
-func NewHistoryManager(historyDir string) (*HistoryManager, error) {
-	if err := os.MkdirAll(historyDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create history directory: %w", err)
-	}
-
-	historyFile := filepath.Join(historyDir, "history.json")
+func NewHistoryManager(repo repository.HistoryRepository) *HistoryManager {
 	return &HistoryManager{
-		historyFile: historyFile,
-	}, nil
+		repo: repo,
+	}
 }
 
 // SaveHistory 保存历史记录
 func (hm *HistoryManager) SaveHistory(job *models.Job, resultPath string) error {
-	hm.mu.Lock()
-	defer hm.mu.Unlock()
+	// 转换FileInfo
+	files := make([]model.FileInfo, len(job.Files))
+	for i, f := range job.Files {
+		files[i] = model.FileInfo{
+			Filename: f.Filename,
+			Size:     f.Size,
+			Type:     f.Type,
+			Path:     f.Path,
+		}
+	}
 
-	// 读取现有历史记录
-	histories, err := hm.loadHistories()
-	if err != nil {
-		histories = []HistoryEntry{}
+	// 转换SheetResult
+	results := make([]model.SheetResult, len(job.Results))
+	for i, r := range job.Results {
+		results[i] = model.SheetResult{
+			SheetName: r.SheetName,
+			RowCount:  r.RowCount,
+			Columns:   r.Columns,
+			Data:      r.Data,
+		}
 	}
 
 	// 创建新的历史记录条目
-	entry := HistoryEntry{
+	entry := model.HistoryEntry{
 		ID:            job.ID,
 		Mode:          job.Mode,
 		Archive:       job.Archive,
-		Files:         job.Files,
+		Files:         files,
 		TotalFiles:    job.TotalFiles,
 		ProcessedFiles: job.ProcessedFiles,
 		ErrorFiles:    job.ErrorFiles,
-		Results:       job.Results,
+		Results:       results,
 		Status:        string(job.GetStatus()),
 		CreatedAt:     job.CreatedAt,
 		CompletedAt:   job.CompletedAt,
@@ -77,111 +69,70 @@ func (hm *HistoryManager) SaveHistory(job *models.Job, resultPath string) error 
 		entry.Error = job.Error
 	}
 
-	// 添加到历史记录列表（按时间倒序）
-	histories = append([]HistoryEntry{entry}, histories...)
-
-	// 只保留最近1000条记录
-	if len(histories) > 1000 {
-		histories = histories[:1000]
+	if err := hm.repo.Create(&entry); err != nil {
+		logger.Logger.Error("Failed to save history",
+			zap.String("job_id", job.ID),
+			zap.Error(err),
+		)
+		return errors.Wrap(err, errors.ErrCodeInternal, "保存历史记录失败")
 	}
 
-	// 保存到文件
-	return hm.saveHistories(histories)
+	return nil
 }
 
-// GetHistories 获取历史记录列表
-func (hm *HistoryManager) GetHistories(limit int) ([]HistoryEntry, error) {
-	hm.mu.RLock()
-	defer hm.mu.RUnlock()
-
-	histories, err := hm.loadHistories()
+// GetHistories 获取历史记录列表（分页）
+func (hm *HistoryManager) GetHistories(page, pageSize int) ([]HistoryEntry, int64, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 100 // 默认每页100条
+	}
+	if pageSize > 1000 {
+		pageSize = 1000 // 最大每页1000条
+	}
+	
+	offset := (page - 1) * pageSize
+	entries, total, err := hm.repo.GetAll(pageSize, offset)
 	if err != nil {
-		return []HistoryEntry{}, nil
+		logger.Logger.Error("Failed to get histories", zap.Error(err))
+		return nil, 0, errors.Wrap(err, errors.ErrCodeInternal, "获取历史记录失败")
 	}
 
-	// 按创建时间倒序排序
-	sort.Slice(histories, func(i, j int) bool {
-		return histories[i].CreatedAt.After(histories[j].CreatedAt)
-	})
-
-	// 限制返回数量
-	if limit > 0 && limit < len(histories) {
-		histories = histories[:limit]
+	result := make([]HistoryEntry, len(entries))
+	for i, entry := range entries {
+		result[i] = *entry
 	}
 
-	return histories, nil
+	return result, total, nil
 }
 
 // GetHistory 获取单个历史记录
 func (hm *HistoryManager) GetHistory(id string) (*HistoryEntry, error) {
-	hm.mu.RLock()
-	defer hm.mu.RUnlock()
-
-	histories, err := hm.loadHistories()
+	entry, err := hm.repo.GetByID(id)
 	if err != nil {
-		return nil, err
+		logger.Logger.Error("Failed to get history",
+			zap.String("id", id),
+			zap.Error(err),
+		)
+		return nil, errors.Wrap(err, errors.ErrCodeInternal, "获取历史记录失败")
 	}
 
-	for _, entry := range histories {
-		if entry.ID == id {
-			return &entry, nil
-		}
+	if entry == nil {
+		return nil, errors.New(errors.ErrCodeNotFound, "历史记录不存在")
 	}
 
-	return nil, fmt.Errorf("history not found: %s", id)
+	return entry, nil
 }
 
 // DeleteHistory 删除历史记录
 func (hm *HistoryManager) DeleteHistory(id string) error {
-	hm.mu.Lock()
-	defer hm.mu.Unlock()
-
-	histories, err := hm.loadHistories()
-	if err != nil {
-		return err
+	if err := hm.repo.Delete(id); err != nil {
+		logger.Logger.Error("Failed to delete history",
+			zap.String("id", id),
+			zap.Error(err),
+		)
+		return errors.Wrap(err, errors.ErrCodeInternal, "删除历史记录失败")
 	}
-
-	// 删除指定记录
-	newHistories := []HistoryEntry{}
-	for _, entry := range histories {
-		if entry.ID != id {
-			newHistories = append(newHistories, entry)
-		}
-	}
-
-	return hm.saveHistories(newHistories)
-}
-
-// loadHistories 从文件加载历史记录
-func (hm *HistoryManager) loadHistories() ([]HistoryEntry, error) {
-	data, err := os.ReadFile(hm.historyFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return []HistoryEntry{}, nil
-		}
-		return nil, err
-	}
-
-	var histories []HistoryEntry
-	if err := json.Unmarshal(data, &histories); err != nil {
-		return nil, err
-	}
-
-	return histories, nil
-}
-
-// saveHistories 保存历史记录到文件
-func (hm *HistoryManager) saveHistories(histories []HistoryEntry) error {
-	data, err := json.MarshalIndent(histories, "", "  ")
-	if err != nil {
-		return err
-	}
-
-	// 写入临时文件，然后重命名（原子操作）
-	tmpFile := hm.historyFile + ".tmp"
-	if err := os.WriteFile(tmpFile, data, 0644); err != nil {
-		return err
-	}
-
-	return os.Rename(tmpFile, hm.historyFile)
+	return nil
 }

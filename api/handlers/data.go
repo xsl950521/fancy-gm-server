@@ -6,7 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"redis_data/api/models"
-	"strconv"
+	"redis_data/api/validators"
+	"redis_data/pkg/response"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -29,43 +30,40 @@ func NewDataHandler(jm *models.JobManager, resultDir string) *DataHandler {
 
 // GetData 获取数据（分页）
 func (h *DataHandler) GetData(c *gin.Context) {
-	jobID := c.Query("jobId")
-	sheetName := c.Query("sheet")
-	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
-	pageSize, _ := strconv.Atoi(c.DefaultQuery("pageSize", "100"))
-
-	if page < 1 {
-		page = 1
-	}
-	if pageSize < 1 || pageSize > 1000 {
-		pageSize = 100
+	var req validators.GetDataRequest
+	// 设置默认值
+	req.Page = 1
+	req.PageSize = 100
+	if !validators.ValidateQuery(c, &req) {
+		return
 	}
 
-	job, exists := h.JobManager.GetJob(jobID)
+	job, exists := h.JobManager.GetJob(req.JobID)
 	if !exists {
-		c.JSON(404, gin.H{"error": "Job not found"})
+		response.NotFound(c, "任务不存在")
 		return
 	}
 
 	if job.GetStatus() != models.JobStatusCompleted {
-		c.JSON(400, gin.H{"error": "Job not completed"})
+		response.BadRequest(c, "任务未完成")
 		return
 	}
 
 	// 读取Excel文件
-	excelPath := filepath.Join(h.ResultDir, fmt.Sprintf("%s.xlsx", jobID))
+	excelPath := filepath.Join(h.ResultDir, fmt.Sprintf("%s.xlsx", req.JobID))
 	f, err := excelize.OpenFile(excelPath)
 	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to open excel file: " + err.Error()})
+		response.InternalError(c, fmt.Errorf("打开Excel文件失败: %w", err))
 		return
 	}
 	defer f.Close()
 
 	// 如果没有指定工作表，使用第一个
+	sheetName := req.Sheet
 	if sheetName == "" {
 		sheets := f.GetSheetList()
 		if len(sheets) == 0 {
-			c.JSON(404, gin.H{"error": "No sheets found"})
+			response.NotFound(c, "未找到工作表")
 			return
 		}
 		sheetName = sheets[0]
@@ -74,18 +72,12 @@ func (h *DataHandler) GetData(c *gin.Context) {
 	// 读取所有行
 	rows, err := f.GetRows(sheetName)
 	if err != nil {
-		c.JSON(500, gin.H{"error": "Failed to read sheet: " + err.Error()})
+		response.InternalError(c, fmt.Errorf("读取工作表失败: %w", err))
 		return
 	}
 
 	if len(rows) == 0 {
-		c.JSON(200, gin.H{
-			"total":    0,
-			"page":     page,
-			"pageSize": pageSize,
-			"data":     []interface{}{},
-			"columns":  []string{},
-		})
+		response.SuccessPage(c, []interface{}{}, 0, req.Page, req.PageSize)
 		return
 	}
 
@@ -94,21 +86,15 @@ func (h *DataHandler) GetData(c *gin.Context) {
 	dataRows := rows[1:]
 
 	// 分页
-	total := len(dataRows)
-	start := (page - 1) * pageSize
-	end := start + pageSize
-	if end > total {
-		end = total
+	total := int64(len(dataRows))
+	start := (req.Page - 1) * req.PageSize
+	end := start + req.PageSize
+	if end > int(total) {
+		end = int(total)
 	}
 
-	if start >= total {
-		c.JSON(200, gin.H{
-			"total":    total,
-			"page":     page,
-			"pageSize": pageSize,
-			"data":     []interface{}{},
-			"columns":  columns,
-		})
+	if start >= int(total) {
+		response.SuccessPage(c, []interface{}{}, total, req.Page, req.PageSize)
 		return
 	}
 
@@ -127,20 +113,31 @@ func (h *DataHandler) GetData(c *gin.Context) {
 		data = append(data, rowData)
 	}
 
-	c.JSON(200, gin.H{
-		"total":    total,
-		"page":     page,
-		"pageSize": pageSize,
-		"data":     data,
+	// 使用统一的分页响应格式
+	response.Success(c, gin.H{
+		"items":    data,
 		"columns":  columns,
+		"total":    total,
+		"page":     req.Page,
+		"page_size": req.PageSize,
+		"total_pages": int((total + int64(req.PageSize) - 1) / int64(req.PageSize)),
 	})
 }
 
 // DownloadFile 下载文件
 func (h *DataHandler) DownloadFile(c *gin.Context) {
-	jobID := c.Param("jobId")
-	format := c.DefaultQuery("format", "excel")
-	sheetName := c.Query("sheet")
+	var req validators.DownloadFileRequest
+	req.Format = "excel" // 默认值
+	if !validators.ValidateURI(c, &req) {
+		return
+	}
+	if !validators.ValidateQuery(c, &req) {
+		return
+	}
+	
+	jobID := req.JobID
+	format := req.Format
+	sheetName := req.Sheet
 
 	// 先尝试从内存中获取任务
 	job, exists := h.JobManager.GetJob(jobID)

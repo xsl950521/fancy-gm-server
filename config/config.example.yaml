@@ -1,0 +1,76 @@
+# GM Server 配置文件示例
+# 支持格式：YAML、JSON、TOML
+# 环境变量优先级高于配置文件
+
+# 服务器配置
+server:
+  host: "0.0.0.0"  # 监听地址
+  port: 8080        # 监听端口
+
+# 数据库配置
+database:
+  host: "localhost"           # 数据库主机
+  port: 5432                  # 数据库端口
+  user: "postgres"            # 数据库用户
+  password: "postgres"        # 数据库密码
+  dbname: "gm_server"          # 数据库名称
+  sslmode: "disable"           # SSL模式: disable, require, verify-ca, verify-full
+  max_open_conns: 100          # 最大打开连接数
+  max_idle_conns: 10           # 最大空闲连接数
+  conn_max_lifetime: 3600      # 连接最大生存时间（秒）
+  conn_max_idle_time: 300      # 连接最大空闲时间（秒）
+
+# 日志配置
+log:
+  level: "info"                # 日志级别: debug, info, warn, error
+  encoding: "json"             # 日志格式: json, console
+  output_path: ""              # 日志输出路径，空则输出到stdout
+  error_path: ""               # 错误日志路径，空则输出到stderr
+
+# Web功能配置
+web:
+  host: "0.0.0.0"              # Web服务监听地址
+  port: 8080                   # Web服务监听端口
+  resend_batch_size: 1000      # 批量补发时每批处理的玩家数量
+  resend_batch_workers: 50     # 批量补发的并发工作协程数
+  resend_rank_workers: 32      # 按排名补发的并发工作协程数
+  resend_http_timeout_sec: 30  # HTTP请求超时时间（秒）
+
+# 中间件配置
+middleware:
+  # 请求日志配置
+  request_logger:
+    enabled: true              # 是否启用请求日志
+
+  # 性能监控配置
+  performance_monitor:
+    enabled: true              # 是否启用性能监控
+    slow_threshold: "1s"       # 慢请求阈值（如：1s, 500ms）
+    max_slow_requests: 100    # 最大慢请求记录数
+
+  # 安全配置
+  security:
+    max_request_body_size: 10485760  # 最大请求体大小（字节），10MB = 10 * 1024 * 1024
+    max_header_size: 8192             # 最大请求头大小（字节），8KB
+
+# 认证配置
+auth:
+  # JWT配置
+  jwt:
+    secret_key: "change-me-in-production"  # JWT密钥（生产环境必须修改！）
+    expiration: "24h"                      # Token过期时间
+    refresh_exp: "168h"                     # 刷新Token过期时间（7天）
+    issuer: "gm-server"                    # 签发者
+
+  # 密码策略
+  password:
+    min_length: 8          # 密码最小长度
+    require_upper: false   # 要求大写字母
+    require_lower: true    # 要求小写字母
+    require_number: false  # 要求数字
+    require_special: false # 要求特殊字符
+
+  # 会话配置
+  session:
+    max_login_attempts: 5    # 最大登录尝试次数
+    lockout_duration: "30m"  # 锁定持续时间
